@@ -98,6 +98,7 @@ import android.widget.Toast;
 import com.android.common.Search;
 import com.android.launcher.R;
 import com.android.launcher2.DropTarget.DragObject;
+import com.android.launcher2.util.PackageManagerHelper;
 
 import java.io.BufferedReader;
 import java.io.DataInputStream;
@@ -180,6 +181,8 @@ public final class Launcher extends Activity
     private static final String RUNTIME_STATE_PENDING_ADD_SPAN_X = "launcher.add_span_x";
     // Type: int
     private static final String RUNTIME_STATE_PENDING_ADD_SPAN_Y = "launcher.add_span_y";
+    // Type: int
+    private static final String RUNTIME_STATE_PENDING_ADD_COMPONENT = "launcher.add_component";
     // Type: parcelable
     private static final String RUNTIME_STATE_PENDING_ADD_WIDGET_INFO = "launcher.add_widget_info";
     // Type: parcelable
@@ -225,7 +228,7 @@ public final class Launcher extends Activity
     private AppWidgetManager mAppWidgetManager;
     private LauncherAppWidgetHost mAppWidgetHost;
 
-    private ItemInfo mPendingAddInfo = new ItemInfo();
+    private PendingAddItemInfo mPendingAddInfo = new PendingAddItemInfo();
     private AppWidgetProviderInfo mPendingAddWidgetInfo;
     private int mPendingAddWidgetId = -1;
 
@@ -982,6 +985,8 @@ public final class Launcher extends Activity
             mPendingAddInfo.cellY = savedState.getInt(RUNTIME_STATE_PENDING_ADD_CELL_Y);
             mPendingAddInfo.spanX = savedState.getInt(RUNTIME_STATE_PENDING_ADD_SPAN_X);
             mPendingAddInfo.spanY = savedState.getInt(RUNTIME_STATE_PENDING_ADD_SPAN_Y);
+            mPendingAddInfo.componentName =
+                    savedState.getParcelable(RUNTIME_STATE_PENDING_ADD_COMPONENT);
             mPendingAddWidgetInfo = savedState.getParcelable(RUNTIME_STATE_PENDING_ADD_WIDGET_INFO);
             mPendingAddWidgetId = savedState.getInt(RUNTIME_STATE_PENDING_ADD_WIDGET_ID);
             mWaitingForResult = true;
@@ -1138,8 +1143,14 @@ public final class Launcher extends Activity
         boolean foundCellSpan = false;
 
         ShortcutInfo info = mModel.infoFromShortcutIntent(this, data, null);
-        if (info == null) {
+        if (info == null || mPendingAddInfo.componentName == null) {
             return;
+        }
+            if (!PackageManagerHelper.hasPermissionForActivity(
+                    this, info.intent, mPendingAddInfo.componentName.getPackageName())) {
+                // The app is trying to add a shortcut without sufficient permissions
+                Log.e(TAG, "Ignoring malicious intent " + info.intent.toUri(0));
+                return;
         }
         final View view = createShortcut(info);
 
@@ -1584,6 +1595,8 @@ public final class Launcher extends Activity
             outState.putInt(RUNTIME_STATE_PENDING_ADD_CELL_Y, mPendingAddInfo.cellY);
             outState.putInt(RUNTIME_STATE_PENDING_ADD_SPAN_X, mPendingAddInfo.spanX);
             outState.putInt(RUNTIME_STATE_PENDING_ADD_SPAN_Y, mPendingAddInfo.spanY);
+            outState.putParcelable(RUNTIME_STATE_PENDING_ADD_COMPONENT,
+                    mPendingAddInfo.componentName);
             outState.putParcelable(RUNTIME_STATE_PENDING_ADD_WIDGET_INFO, mPendingAddWidgetInfo);
             outState.putInt(RUNTIME_STATE_PENDING_ADD_WIDGET_ID, mPendingAddWidgetId);
         }
@@ -1805,6 +1818,7 @@ public final class Launcher extends Activity
         mPendingAddInfo.spanX = mPendingAddInfo.spanY = -1;
         mPendingAddInfo.minSpanX = mPendingAddInfo.minSpanY = -1;
         mPendingAddInfo.dropPos = null;
+        mPendingAddInfo.componentName = null;
     }
 
     void addAppWidgetImpl(final int appWidgetId, ItemInfo info, AppWidgetHostView boundWidget,
@@ -1838,6 +1852,7 @@ public final class Launcher extends Activity
         mPendingAddInfo.container = container;
         mPendingAddInfo.screen = screen;
         mPendingAddInfo.dropPos = loc;
+        mPendingAddInfo.componentName = componentName;
 
         if (cell != null) {
             mPendingAddInfo.cellX = cell[0];

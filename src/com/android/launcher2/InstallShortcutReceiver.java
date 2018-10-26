@@ -22,12 +22,16 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.os.Bundle;
+import android.text.TextUtils;
 import android.util.Base64;
 import android.util.Log;
 import android.widget.Toast;
 
+import com.android.launcher2.util.PackageManagerHelper;
 import com.android.launcher.R;
 
 import java.util.ArrayList;
@@ -38,6 +42,7 @@ import java.util.Set;
 import org.json.*;
 
 public class InstallShortcutReceiver extends BroadcastReceiver {
+    private static final String TAG = "InstallShortcutReceiver";
     public static final String ACTION_INSTALL_SHORTCUT =
             "com.android.launcher.action.INSTALL_SHORTCUT";
     public static final String NEW_APPS_PAGE_KEY = "apps.new.page";
@@ -162,6 +167,7 @@ public class InstallShortcutReceiver extends BroadcastReceiver {
         String name;
         Bitmap icon;
         Intent.ShortcutIconResource iconResource;
+        Context mContext;
 
         public PendingInstallShortcutInfo(Intent rawData, String shortcutName,
                 Intent shortcutIntent) {
@@ -201,6 +207,15 @@ public class InstallShortcutReceiver extends BroadcastReceiver {
                 LauncherModel.getCellCountY() <= 0;
 
         PendingInstallShortcutInfo info = new PendingInstallShortcutInfo(data, name, intent);
+        info.mContext = context;
+        if(needTargetPermissionCheck(info)){
+            if (!PackageManagerHelper.hasPermissionForActivity(
+                    context, info.launchIntent, null)) {
+                // Target cannot be launched, or requires some special permission to launch
+                Log.e(TAG, "Ignoring malicious intent " + info.launchIntent.toUri(0));
+                return;
+            }
+        }
         info.icon = icon;
         info.iconResource = iconResource;
         if (mUseInstallQueue || launcherNotLoaded) {
@@ -359,5 +374,33 @@ public class InstallShortcutReceiver extends BroadcastReceiver {
         }
 
         return CellLayout.findVacantCell(xy, 1, 1, xCount, yCount, occupied);
+    }
+
+    private static boolean needTargetPermissionCheck(PendingInstallShortcutInfo info){
+        boolean needCheck = true;
+        Intent launchIntent = info.launchIntent;
+        if (launchIntent != null
+                && Intent.ACTION_MAIN.equals(launchIntent.getAction())
+                && launchIntent.getComponent() != null
+                && launchIntent.getCategories() != null
+                && launchIntent.getCategories().size() == 1
+                && launchIntent.hasCategory(Intent.CATEGORY_LAUNCHER)
+                && TextUtils.isEmpty(launchIntent.getDataString())) {
+            // An app target can either have no extra or have ItemInfo.EXTRA_PROFILE.
+            Bundle extras = launchIntent.getExtras();
+            if (extras == null) {
+                needCheck = false;
+            } else {
+                Set<String> keys = extras.keySet();
+                needCheck = !(keys.size() == 1 && keys.contains(ItemInfo.EXTRA_PROFILE));
+            }
+        };
+        if(needCheck)
+            return true;
+        PackageManager pm = info.mContext.getPackageManager();
+        ResolveInfo resolveInfo = pm.resolveActivity(info.launchIntent, 0);
+        if(resolveInfo == null)
+             return true;
+        return false;
     }
 }
